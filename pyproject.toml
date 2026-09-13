@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taxi-weather-pipeline"
+version = "0.1.0"
+description = "Taxi and weather data pipeline case study"
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    "pyspark>=3.5,<4.0",
+    "matplotlib>=3.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+
+# Test / lint / type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
+
+# Raw and generated data
+data/raw/taxi/*.parquet
+data/raw/weather/*.csv
+data/processed/
+
+# Keep generated visualization
+!data/output/
+!data/output/trips_by_hour.png
