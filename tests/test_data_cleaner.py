@@ -1,23 +1,11 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import pytest
 from pyspark.sql import SparkSession
 
 from taxi_weather_pipeline.data_cleaner import TaxiDataCleaner
 
 NEW_YORK = ZoneInfo("America/New_York")
-
-
-@pytest.fixture(scope="session")
-def spark() -> SparkSession:
-    return (
-        SparkSession.builder
-        .master("local[1]")
-        .appName("TaxiWeatherPipelineTests")
-        .config("spark.sql.session.timeZone", "America/New_York")
-        .getOrCreate()
-    )
 
 
 def test_clean_removes_invalid_taxi_records(

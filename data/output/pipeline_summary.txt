@@ -1,0 +1,67 @@
+Raw taxi data count: 2964624
+Cleaned taxi data count: 2870990
+Rejected taxi records: 93634
+Out-of-period taxi records: 18
+Raw weather data count: 744
+Cleaned weather data count: 744
+Rejected weather records: 0
+Enriched taxi data count: 2870990
+Trips without matching weather: 0
+Weather match coverage: 100.0000%
+Taxi rejection reasons (one record may have multiple reasons):
++------------------------------+-----+
+|reason                        |count|
++------------------------------+-----+
+|excessive_distance            |31   |
+|excessive_duration            |16   |
+|excessive_speed               |1024 |
+|invalid_total_amount          |35504|
+|invalid_trip_distance         |60371|
+|non_positive_duration         |870  |
+|pickup_outside_analysis_period|18   |
++------------------------------+-----+
+
+Weather rejection reasons (one record may have multiple reasons):
++------+-----+
+|reason|count|
++------+-----+
++------+-----+
+
+Taxi metrics by weather:
++----------------+----------+--------------------+---------------------+
+|weather_category|trip_count|average_total_amount|average_trip_distance|
++----------------+----------+--------------------+---------------------+
+|No precipitation|2188547   |27.46               |3.33                 |
+|Precipitation   |682443    |26.87               |3.17                 |
++----------------+----------+--------------------+---------------------+
+
+Taxi trips by hour of day:
++------------------+----------+
+|pickup_hour_of_day|trip_count|
++------------------+----------+
+|0                 |75284     |
+|1                 |50553     |
+|2                 |35012     |
+|3                 |22961     |
+|4                 |15297     |
+|5                 |17490     |
+|6                 |39441     |
+|7                 |80911     |
+|8                 |113582    |
+|9                 |125637    |
+|10                |135422    |
+|11                |146746    |
+|12                |159942    |
+|13                |165354    |
+|14                |178031    |
+|15                |183997    |
+|16                |184948    |
+|17                |200322    |
+|18                |206448    |
+|19                |178910    |
+|20                |155598    |
+|21                |156006    |
+|22                |138384    |
+|23                |104714    |
++------------------+----------+
+

@@ -3,22 +3,43 @@ from pyspark.sql import functions as F
 
 
 class WeatherReader:
+    HEADER = "time,temperature_2m (°C),weather_code (wmo code),precipitation (mm)"
+    SCHEMA = (
+        "time STRING, temperature_2m DOUBLE, weather_code INT, "
+        "precipitation DOUBLE, _corrupt_record STRING"
+    )
+
     def __init__(self, *, spark: SparkSession) -> None:
         self._spark = spark
 
     def read(self, *, path: str) -> DataFrame:
-        raw_data = self._spark.read.text(path)
-
-        # Open-Meteo CSV files contain metadata before the hourly observations.
-        weather_rows = raw_data.filter(
-            F.col("value").rlike(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2},")
+        # Each monthly weather file is small; preserve line positions after metadata.
+        files = (
+            self._spark.read.text(path, wholetext=True)
+            .withColumn("lines", F.split("value", r"\r?\n"))
+            .withColumn("header_position", F.array_position("lines", self.HEADER))
         )
-
-        columns = F.split(F.col("value"), ",")
-
-        return weather_rows.select(
-            columns[0].alias("time"),
-            columns[1].cast("double").alias("temperature_2m"),
-            columns[2].cast("integer").alias("weather_code"),
-            columns[3].cast("double").alias("precipitation"),
+        invalid_headers = files.filter(
+            (F.col("header_position") == 0)
+            | (F.size(F.filter("lines", lambda line: line.startswith("time,"))) != 1)
         )
+        if invalid_headers.limit(1).count():
+            raise ValueError(f"Expected exactly one weather CSV header: {self.HEADER}")
+
+        rows = (
+            files.select(
+                "header_position", F.posexplode("lines").alias("position", "value")
+            )
+            # array_position is one-based; posexplode is zero-based.
+            .filter(F.col("position") >= F.col("header_position"))
+            .filter(F.length(F.trim("value")) > 0)
+            .select(F.col("value").alias("raw_weather_row"))
+        )
+        return rows.select(
+            "raw_weather_row",
+            F.from_csv(
+                "raw_weather_row",
+                self.SCHEMA,
+                {"mode": "PERMISSIVE", "columnNameOfCorruptRecord": "_corrupt_record"},
+            ).alias("observation"),
+        ).select("raw_weather_row", "observation.*")

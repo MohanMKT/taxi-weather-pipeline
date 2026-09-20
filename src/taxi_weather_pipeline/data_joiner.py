@@ -9,6 +9,16 @@ class TaxiWeatherJoiner:
         taxi_data: DataFrame,
         weather_data: DataFrame,
     ) -> DataFrame:
+        # Multiple observations for an hour would multiply trips in the join.
+        duplicate_hours = (
+            weather_data
+            .groupBy("time")
+            .count()
+            .filter(F.col("count") > 1)
+        )
+        if duplicate_hours.limit(1).count():
+            raise ValueError("Weather timestamps must be unique before joining.")
+
         taxi_with_hour = taxi_data.withColumn(
             "pickup_hour",
             F.date_trunc("hour", F.col("tpep_pickup_datetime")),
