@@ -4,47 +4,65 @@ from pyspark.sql import functions as F
 
 from taxi_weather_pipeline.data_cleaner import TaxiDataCleaner, WeatherDataCleaner
 
+# All taxi tuples follow this order; id identifies the scenario in assertions.
 TAXI_SCHEMA = (
-    "id string, tpep_pickup_datetime string, tpep_dropoff_datetime string, "
-    "passenger_count double, trip_distance double, total_amount double"
+    "id string, "
+    "tpep_pickup_datetime string, "
+    "tpep_dropoff_datetime string, "
+    "passenger_count double, "
+    "trip_distance double, "
+    "total_amount double"
 )
 
 
 def test_taxi_validation_preserves_rows_and_identifies_reasons(
     spark: SparkSession,
 ) -> None:
-    base = ("2024-01-01 10:00:00", "2024-01-01 11:00:00", 1.0, 10.0, 20.0)
+    """Retain all source rows and attach the expected reason to each invalid case."""
+    # Arrange: most cases vary one field of an otherwise valid one-hour trip.
+    pickup = "2024-01-01 10:00:00"
+    dropoff = "2024-01-01 11:00:00"
+
+    # Columns: case ID, pickup, dropoff, passengers, distance (miles), amount (USD).
     records = [
-        ("valid", *base),
-        ("optional_passenger", *base[:2], None, 10.0, 20.0),
+        ("valid", pickup, dropoff, 1.0, 10.0, 20.0),
+        ("optional_passenger", pickup, dropoff, None, 10.0, 20.0),
+        # Date boundaries and invalid timestamps.
         ("before_month", "2023-12-31 23:59:59", "2024-01-01 00:10:00", 1.0, 1.0, 20.0),
         ("after_month", "2024-02-01 00:00:00", "2024-02-01 00:10:00", 1.0, 1.0, 20.0),
-        ("bad_pickup", "2024-01-32 10:00:00", base[1], 1.0, 10.0, 20.0),
-        ("null_pickup", None, base[1], 1.0, 10.0, 20.0),
-        ("bad_dropoff", base[0], "invalid", 1.0, 10.0, 20.0),
-        ("zero_duration", base[0], base[0], 1.0, 10.0, 20.0),
-        ("negative_duration", base[1], base[0], 1.0, 10.0, 20.0),
-        ("long_duration", base[0], "2024-01-02 11:00:00", 1.0, 10.0, 20.0),
-        ("long_distance", base[0], "2024-01-01 13:00:00", 1.0, 201.0, 20.0),
-        ("fast", *base[:2], 1.0, 101.0, 20.0),
-        ("nan_distance", *base[:2], 1.0, float("nan"), 20.0),
-        ("infinite_distance", *base[:2], 1.0, float("inf"), 20.0),
-        ("zero_distance", *base[:2], 1.0, 0.0, 20.0),
-        ("nan_amount", *base[:2], 1.0, 10.0, float("nan")),
-        ("infinite_amount", *base[:2], 1.0, 10.0, float("inf")),
-        ("negative_amount", *base[:2], 1.0, 10.0, -1.0),
-        ("negative_passenger", *base[:2], -1.0, 10.0, 20.0),
-        ("nan_passenger", *base[:2], float("nan"), 10.0, 20.0),
+        ("bad_pickup", "2024-01-32 10:00:00", dropoff, 1.0, 10.0, 20.0),
+        ("null_pickup", None, dropoff, 1.0, 10.0, 20.0),
+        ("bad_dropoff", pickup, "invalid", 1.0, 10.0, 20.0),
+        # Implausible duration, distance, or average speed.
+        ("zero_duration", pickup, pickup, 1.0, 10.0, 20.0),
+        ("negative_duration", dropoff, pickup, 1.0, 10.0, 20.0),
+        ("long_duration", pickup, "2024-01-02 11:00:00", 1.0, 10.0, 20.0),
+        ("long_distance", pickup, "2024-01-01 13:00:00", 1.0, 201.0, 20.0),
+        ("fast", pickup, dropoff, 1.0, 101.0, 20.0),
+        # Non-finite values and invalid numeric signs.
+        ("nan_distance", pickup, dropoff, 1.0, float("nan"), 20.0),
+        ("infinite_distance", pickup, dropoff, 1.0, float("inf"), 20.0),
+        ("zero_distance", pickup, dropoff, 1.0, 0.0, 20.0),
+        ("nan_amount", pickup, dropoff, 1.0, 10.0, float("nan")),
+        ("infinite_amount", pickup, dropoff, 1.0, 10.0, float("inf")),
+        ("negative_amount", pickup, dropoff, 1.0, 10.0, -1.0),
+        ("negative_passenger", pickup, dropoff, -1.0, 10.0, 20.0),
+        ("nan_passenger", pickup, dropoff, float("nan"), 10.0, 20.0),
     ]
+
+    # Act
     validated = TaxiDataCleaner().validate(
         taxi_data=spark.createDataFrame(records, TAXI_SCHEMA)
     )
     rows = {row.id: row for row in validated.collect()}
+
+    # Assert: validation labels rejected rows instead of losing them.
     assert len(rows) == len(records)
     assert {key for key, row in rows.items() if not row.rejection_reasons} == {
         "valid",
         "optional_passenger",
     }
+
     expected = {
         "before_month": "pickup_outside_analysis_period",
         "after_month": "pickup_outside_analysis_period",
@@ -65,16 +83,24 @@ def test_taxi_validation_preserves_rows_and_identifies_reasons(
         "negative_passenger": "invalid_passenger_count",
         "nan_passenger": "invalid_passenger_count",
     }
+
     for row_id, reason in expected.items():
         assert reason in rows[row_id].rejection_reasons
+
+    # The original invalid value must remain available for quarantine review.
     assert rows["bad_pickup"].raw_pickup_datetime == "2024-01-32 10:00:00"
     assert rows["bad_pickup"].tpep_pickup_datetime is None
 
 
 def test_taxi_boundaries_and_month_crossing_dropoff(spark: SparkSession) -> None:
+    """Include January boundary pickups and trips exactly at the configured limits."""
+    # Arrange
+    # Columns: case ID, pickup, dropoff, passengers, distance (miles), amount (USD).
     records = [
         ("month_start", "2024-01-01T00:00", "2024-01-01T00:30", None, 1.0, 0.0),
+        # A February dropoff is allowed when pickup is still in January.
         ("month_end", "2024-01-31T23:59:59", "2024-02-01T00:01:00", 1.0, 0.5, 10.0),
+        # 200 miles in two hours reaches both the distance and speed limits.
         (
             "distance_speed_limit",
             "2024-01-02 00:00:00",
@@ -83,6 +109,7 @@ def test_taxi_boundaries_and_month_crossing_dropoff(spark: SparkSession) -> None
             200.0,
             100.0,
         ),
+        # Exactly 24 hours is valid; only longer durations are rejected.
         (
             "duration_limit",
             "2024-01-02 00:00:00",
@@ -92,10 +119,15 @@ def test_taxi_boundaries_and_month_crossing_dropoff(spark: SparkSession) -> None
             100.0,
         ),
     ]
+
+    # Act
     cleaned = TaxiDataCleaner().clean(
         taxi_data=spark.createDataFrame(records, TAXI_SCHEMA)
     )
+
+    # Assert
     assert {row.id for row in cleaned.collect()} == {row[0] for row in records}
+
     hours = {
         row.id: row.hour
         for row in cleaned.select(
@@ -107,6 +139,9 @@ def test_taxi_boundaries_and_month_crossing_dropoff(spark: SparkSession) -> None
 
 
 def test_taxi_analysis_rules_are_configurable(spark: SparkSession) -> None:
+    """Apply custom dates and limits instead of the January case-study defaults."""
+    # Arrange: a 300-mile, 25-hour February trip fails the defaults.
+    # Columns: case ID, pickup, dropoff, passengers, distance (miles), amount (USD).
     data = spark.createDataFrame(
         [
             (
@@ -120,6 +155,7 @@ def test_taxi_analysis_rules_are_configurable(spark: SparkSession) -> None:
         ],
         TAXI_SCHEMA,
     )
+
     cleaner = TaxiDataCleaner(
         start_date="2024-02-01",
         end_date="2024-03-01",
@@ -127,18 +163,28 @@ def test_taxi_analysis_rules_are_configurable(spark: SparkSession) -> None:
         max_duration_hours=48,
         max_speed_mph=150,
     )
+
+    # Act / Assert: the same record passes only with the expanded settings.
     assert cleaner.clean(taxi_data=data).count() == 1
     assert TaxiDataCleaner().clean(taxi_data=data).count() == 0
 
 
-@pytest.mark.parametrize("ansi", ["true", "false"])
+@pytest.mark.parametrize(
+    "ansi",
+    ["true", "false"],
+    ids=["ansi_enabled", "ansi_disabled"],
+)
 def test_weather_timestamps_are_consistent_and_invalid_values_are_rejected(
     spark: SparkSession,
     ansi: str,
 ) -> None:
+    """Normalize supported formats and reject bad dates under either ANSI setting."""
+    # Restore this setting because the Spark session is shared by all tests.
     previous = spark.conf.get("spark.sql.ansi.enabled")
     spark.conf.set("spark.sql.ansi.enabled", ansi)
+
     try:
+        # Arrange: the first three values describe the same valid local hour.
         values = [
             "2024-01-01T10:00",
             "2024-01-01T10:00:00",
@@ -148,10 +194,14 @@ def test_weather_timestamps_are_consistent_and_invalid_values_are_rejected(
             None,
             "2024-01-01T10:00:00junk",
         ]
+
+        # Columns: local timestamp, temperature (°C), precipitation (mm).
         data = spark.createDataFrame(
             [(value, -2.5, 0.0) for value in values],
             "time string, temperature_2m double, precipitation double",
         )
+
+        # Act
         rows = (
             WeatherDataCleaner()
             .validate(weather_data=data)
@@ -162,6 +212,8 @@ def test_weather_timestamps_are_consistent_and_invalid_values_are_rejected(
             )
             .collect()
         )
+
+        # Assert: valid formats normalize identically; remaining inputs are rejected.
         assert [row.time for row in rows[:3]] == ["2024-01-01 10:00:00"] * 3
         assert all(row.rejection_reasons == [] for row in rows[:3])
         assert all(
@@ -174,6 +226,9 @@ def test_weather_timestamps_are_consistent_and_invalid_values_are_rejected(
 def test_weather_rejects_nonfinite_values_negative_precipitation_and_partial_hours(
     spark: SparkSession,
 ) -> None:
+    """Keep valid cold weather while rejecting bad numbers and non-hourly times."""
+    # Arrange
+    # Columns: case ID, local timestamp, temperature (°C), precipitation (mm).
     data = spark.createDataFrame(
         [
             ("valid_cold", "2024-01-01T10:00", -10.0, 0.0),
@@ -189,9 +244,12 @@ def test_weather_rejects_nonfinite_values_negative_precipitation_and_partial_hou
         "id string, time string, temperature_2m double, precipitation double",
     )
     cleaner = WeatherDataCleaner()
+
+    # Act / Assert: negative temperatures are valid, unlike negative precipitation.
     assert [row.id for row in cleaner.clean(weather_data=data).collect()] == [
         "valid_cold"
     ]
+
     rows = {row.id: row for row in cleaner.validate(weather_data=data).collect()}
     assert rows["negative_precip"].rejection_reasons == ["invalid_precipitation"]
     assert rows["nan_temp"].rejection_reasons == ["invalid_temperature"]

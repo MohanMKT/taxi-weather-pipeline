@@ -10,6 +10,7 @@ from taxi_weather_pipeline.weather_reader import WeatherReader
 
 
 def _report_rejections(*, rejected: DataFrame, label: str) -> None:
+    """Count each rejection reason, including overlapping failures on one row."""
     print(f"{label} rejection reasons (one record may have multiple reasons):")
     (
         rejected.select(F.explode("rejection_reasons").alias("reason"))
@@ -21,6 +22,8 @@ def _report_rejections(*, rejected: DataFrame, label: str) -> None:
 
 
 def run_pipeline(*, spark: SparkSession) -> None:
+    """Read, validate, enrich, and summarize the January case-study datasets."""
+    # Cache validation results because both quarantine and analysis reuse them.
     taxi_data = TaxiReader(spark=spark).read(
         path="data/raw/taxi/yellow_tripdata_2024-01.parquet"
     )
@@ -56,9 +59,11 @@ def run_pipeline(*, spark: SparkSession) -> None:
         )
         .cache()
     )
+
     analyzer = TaxiWeatherAnalyzer()
     weather_summary = analyzer.summarize_by_weather(taxi_weather_data=enriched)
     hourly_summary = analyzer.summarize_by_hour(taxi_weather_data=enriched)
+
     TaxiDemandVisualizer().plot_by_hour(
         hourly_summary=hourly_summary,
         output_path="data/output/trips_by_hour.png",
@@ -67,45 +72,50 @@ def run_pipeline(*, spark: SparkSession) -> None:
     raw_taxi_count = validated_taxi.count()
     cleaned_taxi_count = cleaned_taxi.count()
     missing_weather_count = enriched.filter(F.col("temperature_2m").isNull()).count()
+
     print(f"Raw taxi data count: {raw_taxi_count}")
     print(f"Cleaned taxi data count: {cleaned_taxi_count}")
     print(f"Rejected taxi records: {rejected_taxi.count()}")
-    print(
-        "Out-of-period taxi records: "
-        + str(
-            validated_taxi.filter(
-                F.array_contains("rejection_reasons", "pickup_outside_analysis_period")
-            ).count()
-        )
-    )
+    out_of_period_count = validated_taxi.filter(
+        F.array_contains("rejection_reasons", "pickup_outside_analysis_period")
+    ).count()
+    print(f"Out-of-period taxi records: {out_of_period_count}")
     print(f"Raw weather data count: {validated_weather.count()}")
     print(f"Cleaned weather data count: {cleaned_weather.count()}")
     print(f"Rejected weather records: {rejected_weather.count()}")
     print(f"Enriched taxi data count: {enriched.count()}")
     print(f"Trips without matching weather: {missing_weather_count}")
+
     if cleaned_taxi_count:
         coverage = 100 * (1 - missing_weather_count / cleaned_taxi_count)
         print(f"Weather match coverage: {coverage:.4f}%")
     else:
         print("Weather match coverage: N/A (no valid trips)")
+
     _report_rejections(rejected=rejected_taxi, label="Taxi")
     _report_rejections(rejected=rejected_weather, label="Weather")
+
     print("Taxi metrics by weather:")
     weather_summary.show(truncate=False)
+
     print("Taxi trips by hour of day:")
     hourly_summary.show(24, truncate=False)
+
+    # Release cached datasets after the final Spark actions have completed.
     enriched.unpersist()
     validated_weather.unpersist()
     validated_taxi.unpersist()
 
 
 def main() -> None:
+    """Own the local Spark session and stop it even if the pipeline fails."""
     spark = (
         SparkSession.builder.appName("TaxiWeatherPipeline")
         .master("local[*]")
         .config("spark.sql.session.timeZone", "America/New_York")
         .getOrCreate()
     )
+
     try:
         run_pipeline(spark=spark)
     finally:

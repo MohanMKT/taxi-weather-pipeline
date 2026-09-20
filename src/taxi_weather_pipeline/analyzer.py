@@ -8,6 +8,7 @@ class TaxiWeatherAnalyzer:
         *,
         taxi_weather_data: DataFrame,
     ) -> DataFrame:
+        """Summarize observed trips by precipitation, including unmatched weather."""
         data_with_weather_category = taxi_weather_data.withColumn(
             "weather_category",
             F.when(
@@ -22,8 +23,7 @@ class TaxiWeatherAnalyzer:
         )
 
         return (
-            data_with_weather_category
-            .groupBy("weather_category")
+            data_with_weather_category.groupBy("weather_category")
             .agg(
                 F.count("*").alias("trip_count"),
                 F.round(
@@ -43,9 +43,9 @@ class TaxiWeatherAnalyzer:
         *,
         taxi_weather_data: DataFrame,
     ) -> DataFrame:
+        """Combine all dates by pickup hour in the Spark session's timezone."""
         return (
-            taxi_weather_data
-            .withColumn(
+            taxi_weather_data.withColumn(
                 "pickup_hour_of_day",
                 F.hour("tpep_pickup_datetime"),
             )

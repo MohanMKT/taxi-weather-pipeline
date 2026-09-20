@@ -11,6 +11,8 @@ class TaxiDemandVisualizer:
         hourly_summary: DataFrame,
         output_path: str,
     ) -> None:
+        """Save completed-trip counts for each pickup hour as a bar chart."""
+        # Only the hourly aggregate (at most 24 rows) is collected to the driver.
         rows = hourly_summary.collect()
 
         hours = [row["pickup_hour_of_day"] for row in rows]

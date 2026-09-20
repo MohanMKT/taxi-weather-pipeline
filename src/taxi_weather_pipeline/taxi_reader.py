@@ -6,4 +6,5 @@ class TaxiReader:
         self.spark = spark
 
     def read(self, *, path: str) -> DataFrame:
+        """Load taxi records using the schema stored in the Parquet source."""
         return self.spark.read.parquet(path)

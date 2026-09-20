@@ -13,7 +13,9 @@ def test_join_matches_taxi_trip_to_hourly_weather(
     *,
     spark: SparkSession,
 ) -> None:
+    """A pickup at 10:15 receives the observation for 10:00."""
     # Arrange
+    # Taxi columns: pickup timestamp, distance (miles), total amount (USD).
     taxi_data = spark.createDataFrame(
         [
             (
@@ -29,6 +31,7 @@ def test_join_matches_taxi_trip_to_hourly_weather(
         ],
     )
 
+    # Weather columns: observation time, temperature (°C), precipitation (mm), code.
     weather_data = spark.createDataFrame(
         [
             (
@@ -65,7 +68,9 @@ def test_join_preserves_trips_without_matching_weather(
     *,
     spark: SparkSession,
 ) -> None:
+    """A left join keeps both matched and unmatched trips without duplicating them."""
     # Arrange
+    # Taxi columns: trip ID, pickup timestamp. Weather is available only at 10:00.
     taxi_data = spark.createDataFrame(
         [
             ("matched", datetime(2024, 1, 1, 10, 15, tzinfo=NEW_YORK)),
@@ -73,6 +78,8 @@ def test_join_preserves_trips_without_matching_weather(
         ],
         ["trip_id", "tpep_pickup_datetime"],
     )
+
+    # Weather columns: observation time, temperature (°C), precipitation (mm), code.
     weather_data = spark.createDataFrame(
         [(datetime(2024, 1, 1, 10, 0, tzinfo=NEW_YORK), 2.5, 0.0, 3)],
         ["time", "temperature_2m", "precipitation", "weather_code"],
@@ -97,17 +104,25 @@ def test_join_preserves_trips_without_matching_weather(
         assert rows_by_trip["unmatched"][column] is None
 
 
-@pytest.mark.parametrize("second_temperature", [2.5, 8.0])
+@pytest.mark.parametrize(
+    "second_temperature",
+    [2.5, 8.0],
+    ids=["identical_observations", "conflicting_observations"],
+)
 def test_join_rejects_duplicate_weather_timestamps(
     *,
     spark: SparkSession,
     second_temperature: float,
 ) -> None:
+    """Reject repeated weather hours regardless of whether readings agree."""
     # Arrange: both identical and conflicting observations must be rejected.
+    # The taxi input contains only the pickup timestamp needed by the join.
     taxi_data = spark.createDataFrame(
         [(datetime(2024, 1, 1, 10, 15, tzinfo=NEW_YORK),)],
         ["tpep_pickup_datetime"],
     )
+
+    # Weather columns: observation time, temperature (°C).
     weather_data = spark.createDataFrame(
         [
             (datetime(2024, 1, 1, 10, 0, tzinfo=NEW_YORK), 2.5),

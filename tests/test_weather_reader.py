@@ -13,6 +13,9 @@ def test_reader_skips_metadata_and_preserves_bad_rows_for_quarantine(
     spark: SparkSession,
     tmp_path: Path,
 ) -> None:
+    """Skip the metadata while retaining malformed observations for validation."""
+    # Arrange: hourly columns are time, temperature (°C), weather code, precipitation (mm).
+    # The first two observations are valid; the rest have a bad date, number, or field count.
     path = tmp_path / "weather.csv"
     path.write_text(
         "latitude,longitude,elevation,utc_offset_seconds,timezone,timezone_abbreviation\n"
@@ -23,15 +26,19 @@ def test_reader_skips_metadata_and_preserves_bad_rows_for_quarantine(
         "2024-01-01T12:00,broken,3,0.0\n"
         "2024-01-01T13:00,2.0,3,0.0,extra\n"
     )
+
+    # Act
     data = WeatherReader(spark=spark).read(path=str(path))
-    assert data.count() == 5
     rows = WeatherDataCleaner().validate(weather_data=data).collect()
-    assert len([row for row in rows if not row.rejection_reasons]) == 2
     invalid = {
         row.raw_weather_row: row.rejection_reasons
         for row in rows
         if row.rejection_reasons
     }
+
+    # Assert: bad observations remain available with their raw CSV text and reasons.
+    assert data.count() == 5
+    assert len([row for row in rows if not row.rejection_reasons]) == 2
     assert "invalid_weather_timestamp" in invalid["not-a-date,2.0,3,0.0"]
     assert "malformed_weather_row" in invalid["2024-01-01T12:00,broken,3,0.0"]
     assert "malformed_weather_row" in invalid["2024-01-01T13:00,2.0,3,0.0,extra"]
@@ -46,13 +53,24 @@ def test_reader_skips_metadata_and_preserves_bad_rows_for_quarantine(
         "unrecognized header",
         HEADER + "\n" + HEADER,
     ],
+    ids=[
+        "reordered_columns",
+        "wrong_units",
+        "missing_column",
+        "missing_header",
+        "duplicate_header",
+    ],
 )
 def test_reader_rejects_unexpected_or_duplicate_headers(
     spark: SparkSession,
     tmp_path: Path,
     header: str,
 ) -> None:
+    """Fail before parsing when the weather CSV violates the declared column contract."""
+    # Arrange: the observation columns follow the expected header order.
     path = tmp_path / "weather.csv"
     path.write_text(header + "\n2024-01-01T10:00,2.5,3,0.0\n")
+
+    # Act / Assert
     with pytest.raises(ValueError, match="Expected exactly one weather CSV header"):
         WeatherReader(spark=spark).read(path=str(path))
