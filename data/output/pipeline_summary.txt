@@ -2,8 +2,8 @@ Raw taxi data count: 2964624
 Cleaned taxi data count: 2870990
 Rejected taxi records: 93634
 Out-of-period taxi records: 18
-Raw weather data count: 744
-Cleaned weather data count: 744
+Raw weather data count: 768
+Cleaned weather data count: 768
 Rejected weather records: 0
 Enriched taxi data count: 2870990
 Trips without matching weather: 0
@@ -31,8 +31,8 @@ Taxi metrics by weather:
 +----------------+----------+--------------------+---------------------+
 |weather_category|trip_count|average_total_amount|average_trip_distance|
 +----------------+----------+--------------------+---------------------+
-|No precipitation|2188547   |27.46               |3.33                 |
-|Precipitation   |682443    |26.87               |3.17                 |
+|No precipitation|2200159   |27.49               |3.33                 |
+|Precipitation   |670831    |26.74               |3.17                 |
 +----------------+----------+--------------------+---------------------+
 
 Taxi trips by hour of day:

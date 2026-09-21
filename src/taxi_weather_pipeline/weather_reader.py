@@ -33,22 +33,35 @@ class WeatherReader:
         if invalid_headers.limit(1).count():
             raise ValueError(f"Expected exactly one weather CSV header: {self.HEADER}")
 
+        # Open-Meteo stores the fixed offset in the metadata row of each file.
+        files = files.withColumn(
+            "utc_offset_seconds",
+            F.from_csv(
+                F.col("lines")[1],
+                "latitude DOUBLE, longitude DOUBLE, elevation DOUBLE, "
+                "utc_offset_seconds INT, timezone STRING, timezone_abbreviation STRING",
+            ).getField("utc_offset_seconds"),
+        )
+
         rows = (
             files.select(
-                "header_position", F.posexplode("lines").alias("position", "value")
+                "header_position",
+                "utc_offset_seconds",
+                F.posexplode("lines").alias("position", "value"),
             )
             # array_position is one-based; posexplode is zero-based.
             .filter(F.col("position") >= F.col("header_position"))
             .filter(F.length(F.trim("value")) > 0)
-            .select(F.col("value").alias("raw_weather_row"))
+            .select("utc_offset_seconds", F.col("value").alias("raw_weather_row"))
         )
 
         # PERMISSIVE parsing retains bad rows for the cleaner to quarantine.
         return rows.select(
             "raw_weather_row",
+            "utc_offset_seconds",
             F.from_csv(
                 "raw_weather_row",
                 self.SCHEMA,
                 {"mode": "PERMISSIVE", "columnNameOfCorruptRecord": "_corrupt_record"},
             ).alias("observation"),
-        ).select("raw_weather_row", "observation.*")
+        ).select("raw_weather_row", "utc_offset_seconds", "observation.*")

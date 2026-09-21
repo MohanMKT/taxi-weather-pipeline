@@ -1,12 +1,66 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 from taxi_weather_pipeline.data_cleaner import WeatherDataCleaner
 from taxi_weather_pipeline.weather_reader import WeatherReader
 
 HEADER = "time,temperature_2m (°C),weather_code (wmo code),precipitation (mm)"
+
+
+@pytest.mark.parametrize(
+    ("session_timezone", "expected_local_time"),
+    [
+        ("America/New_York", "2023-12-31 23:00:00"),
+        ("UTC", "2024-01-01 04:00:00"),
+    ],
+)
+def test_reader_and_cleaner_honor_source_offset(
+    spark: SparkSession,
+    tmp_path: Path,
+    session_timezone: str,
+    expected_local_time: str,
+) -> None:
+    """UTC-4 metadata determines the instant even when New York uses UTC-5."""
+    path = tmp_path / "weather.csv"
+    path.write_text(
+        "latitude,longitude,elevation,utc_offset_seconds,timezone,timezone_abbreviation\n"
+        "40.7,-74.0,32.0,-14400,America/New_York,GMT-4\n\n" + HEADER + "\n"
+        "2024-01-01T00:00,1.9,3,0.5\n"
+    )
+    previous = spark.conf.get("spark.sql.session.timeZone")
+    assert previous is not None
+    spark.conf.set("spark.sql.session.timeZone", session_timezone)
+    try:
+        data = WeatherReader(spark=spark).read(path=str(path))
+        row = (
+            WeatherDataCleaner()
+            .validate(weather_data=data)
+            .select(
+                "raw_time",
+                "utc_offset_seconds",
+                "precipitation",
+                "rejection_reasons",
+                F.col("time").cast("long").alias("epoch_seconds"),
+                F.date_format("time", "yyyy-MM-dd HH:mm:ss").alias("local_time"),
+            )
+            .first()
+        )
+
+        assert row is not None
+        assert row.utc_offset_seconds == -14400
+        assert row.raw_time == "2024-01-01T00:00"
+        assert row.epoch_seconds == int(
+            datetime(2024, 1, 1, 4, tzinfo=UTC).timestamp()
+        )
+        assert row.local_time == expected_local_time
+        assert row.precipitation == 0.5
+        assert row.rejection_reasons == []
+    finally:
+        spark.conf.set("spark.sql.session.timeZone", previous)
 
 
 def test_reader_skips_metadata_and_preserves_bad_rows_for_quarantine(

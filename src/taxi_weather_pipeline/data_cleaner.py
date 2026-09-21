@@ -1,14 +1,28 @@
+import math
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
 
-def _local_timestamp(column: str) -> Column:
-    """Parse supported local timestamp formats; return null for invalid inputs."""
+def _local_timestamp(column: str, *, utc_offset_seconds: Column | None = None) -> Column:
+    """Parse local labels using a supplied offset or the session timezone."""
     value = F.col(column).cast("string")
     pattern = r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?$"
 
     # Check the format before parsing so offsets and trailing text are rejected.
-    return F.when(value.rlike(pattern), F.try_to_timestamp(value))
+    timestamp = F.try_to_timestamp(value)
+    if utc_offset_seconds is not None:
+        # Parse in UTC first so session DST rules cannot alter the source label.
+        timestamp = F.timestamp_seconds(
+            F.try_to_timestamp(
+                F.concat(F.regexp_replace(value, "T", " "), F.lit("Z")),
+                F.lit("yyyy-MM-dd HH:mm[:ss[.SSSSSS]]X"),
+            ).cast("double")
+            - utc_offset_seconds
+        )
+    return F.when(value.rlike(pattern), timestamp)
 
 
 def _finite(column: str) -> Column:
@@ -38,6 +52,30 @@ class TaxiDataCleaner:
         max_duration_hours: float = 24.0,
         max_speed_mph: float = 100.0,
     ) -> None:
+        for name, value in (("start_date", start_date), ("end_date", end_date)):
+            try:
+                parsed = date.fromisoformat(value)
+                if parsed.isoformat() != value:
+                    raise ValueError
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"{name} must be a valid date in YYYY-MM-DD format."
+                ) from error
+        if start_date >= end_date:
+            raise ValueError("start_date must be before end_date.")
+
+        for name, limit in (
+            ("max_distance_miles", max_distance_miles),
+            ("max_duration_hours", max_duration_hours),
+            ("max_speed_mph", max_speed_mph),
+        ):
+            try:
+                valid = math.isfinite(limit) and limit > 0
+            except (TypeError, ValueError, OverflowError):
+                valid = False
+            if not valid:
+                raise ValueError(f"{name} must be finite and greater than zero.")
+
         self.start_date = start_date
         self.end_date = end_date
 
@@ -126,10 +164,46 @@ class TaxiDataCleaner:
 class WeatherDataCleaner:
     """Validate hourly weather observations while retaining rejected source data."""
 
+    def validate_calendar(self, *, weather_data: DataFrame) -> None:
+        """Require both kinds of coverage for January in the session timezone."""
+        # The fixed monthly input is small; collect only its normalized hour labels.
+        available = {
+            row.time
+            for row in weather_data.select(
+                F.date_format("time", "yyyy-MM-dd HH:mm:ss").alias("time")
+            ).collect()
+        }
+        if not available:
+            raise ValueError("Cleaned weather input is empty; January coverage is required.")
+
+        missing_observations = []
+        missing_precipitation = []
+        start = datetime(2024, 1, 1, tzinfo=ZoneInfo("America/New_York"))
+        for offset in range(31 * 24):
+            hour = start + timedelta(hours=offset)
+            label = hour.strftime("%Y-%m-%d %H:%M:%S")
+            if label not in available:
+                missing_observations.append(label)
+            if (hour + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S") not in available:
+                missing_precipitation.append(label)
+
+        if missing_observations or missing_precipitation:
+            raise ValueError(
+                "Missing weather coverage for January pickup hours: "
+                f"instantaneous={missing_observations}; "
+                f"precipitation={missing_precipitation}"
+            )
+
     def validate(self, *, weather_data: DataFrame) -> DataFrame:
         """Keep invalid observations available for quarantine instead of dropping them."""
+        # In-memory observations without source metadata retain local-time parsing.
+        offset = (
+            F.col("utc_offset_seconds")
+            if "utc_offset_seconds" in weather_data.columns
+            else None
+        )
         normalized = weather_data.withColumn("raw_time", F.col("time")).withColumn(
-            "time", _local_timestamp("time")
+            "time", _local_timestamp("time", utc_offset_seconds=offset)
         )
 
         rules = [
