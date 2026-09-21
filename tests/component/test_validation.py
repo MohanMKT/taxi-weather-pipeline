@@ -49,11 +49,11 @@ def test_taxi_validation_preserves_rows_and_identifies_reasons(
         ("negative_passenger", pickup, dropoff, -1.0, 10.0, 20.0),
         ("nan_passenger", pickup, dropoff, float("nan"), 10.0, 20.0),
     ]
+    taxi_data = spark.createDataFrame(records, TAXI_SCHEMA)
+    cleaner = TaxiDataCleaner()
 
     # Act
-    validated = TaxiDataCleaner().validate(
-        taxi_data=spark.createDataFrame(records, TAXI_SCHEMA)
-    )
+    validated = cleaner.validate(taxi_data=taxi_data)
     rows = {row.id: row for row in validated.collect()}
 
     # Assert: validation labels rejected rows instead of losing them.
@@ -120,20 +120,21 @@ def test_taxi_boundaries_and_month_crossing_dropoff(spark: SparkSession) -> None
         ),
     ]
 
+    taxi_data = spark.createDataFrame(records, TAXI_SCHEMA)
+    cleaner = TaxiDataCleaner()
+
     # Act
-    cleaned = TaxiDataCleaner().clean(
-        taxi_data=spark.createDataFrame(records, TAXI_SCHEMA)
-    )
-
-    # Assert
-    assert {row.id for row in cleaned.collect()} == {row[0] for row in records}
-
+    cleaned = cleaner.clean(taxi_data=taxi_data)
+    cleaned_ids = {row.id for row in cleaned.collect()}
     hours = {
         row.id: row.hour
         for row in cleaned.select(
             "id", F.hour("tpep_pickup_datetime").alias("hour")
         ).collect()
     }
+
+    # Assert
+    assert cleaned_ids == {row[0] for row in records}
     assert hours["month_start"] == 0
     assert hours["month_end"] == 23
 
@@ -163,10 +164,15 @@ def test_taxi_analysis_rules_are_configurable(spark: SparkSession) -> None:
         max_duration_hours=48,
         max_speed_mph=150,
     )
+    default_cleaner = TaxiDataCleaner()
 
-    # Act / Assert: the same record passes only with the expanded settings.
-    assert cleaner.clean(taxi_data=data).count() == 1
-    assert TaxiDataCleaner().clean(taxi_data=data).count() == 0
+    # Act
+    custom_count = cleaner.clean(taxi_data=data).count()
+    default_count = default_cleaner.clean(taxi_data=data).count()
+
+    # Assert: the same record passes only with the expanded settings.
+    assert custom_count == 1
+    assert default_count == 0
 
 
 @pytest.mark.parametrize(
@@ -245,12 +251,12 @@ def test_weather_rejects_nonfinite_values_negative_precipitation_and_partial_hou
     )
     cleaner = WeatherDataCleaner()
 
-    # Act / Assert: negative temperatures are valid, unlike negative precipitation.
-    assert [row.id for row in cleaner.clean(weather_data=data).collect()] == [
-        "valid_cold"
-    ]
-
+    # Act
+    cleaned_ids = [row.id for row in cleaner.clean(weather_data=data).collect()]
     rows = {row.id: row for row in cleaner.validate(weather_data=data).collect()}
+
+    # Assert: negative temperatures are valid, unlike negative precipitation.
+    assert cleaned_ids == ["valid_cold"]
     assert rows["negative_precip"].rejection_reasons == ["invalid_precipitation"]
     assert rows["nan_temp"].rejection_reasons == ["invalid_temperature"]
     assert rows["partial_hour"].rejection_reasons == ["weather_not_on_hour"]

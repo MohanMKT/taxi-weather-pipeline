@@ -54,6 +54,7 @@ def test_clean_removes_invalid_taxi_records(
 
     # Act
     cleaned_data = cleaner.clean(taxi_data=taxi_data)
+    cleaned_count = cleaned_data.count()
 
     # Assert
-    assert cleaned_data.count() == 1
+    assert cleaned_count == 1

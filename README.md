@@ -74,14 +74,17 @@ taxi-weather-pipeline/
 │
 ├── tests/
 │   ├── conftest.py
-│   ├── test_analyzer.py
-│   ├── test_configuration.py
-│   ├── test_data_cleaner.py
-│   ├── test_data_joiner.py
-│   ├── test_pipeline.py
-│   ├── test_validation.py
-│   ├── test_weather_calendar.py
-│   └── test_weather_reader.py
+│   ├── unit/
+│   │   └── test_configuration.py
+│   ├── component/
+│   │   ├── test_analyzer.py
+│   │   ├── test_data_cleaner.py
+│   │   ├── test_data_joiner.py
+│   │   ├── test_validation.py
+│   │   ├── test_weather_calendar.py
+│   │   └── test_weather_reader.py
+│   └── integration/
+│       └── test_pipeline.py
 │
 ├── .gitignore
 ├── pyproject.toml

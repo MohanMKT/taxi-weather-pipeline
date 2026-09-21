@@ -119,6 +119,7 @@ def test_final_january_pickup_uses_february_precipitation(
     include_midnight_observation: bool,
 ) -> None:
     """Use February midnight in New York, or retain null if it is absent."""
+    # Arrange
     path = tmp_path / "weather.csv"
     # With UTC-4 source labels, February 1 at 01:00 is midnight in New York.
     content = (
@@ -138,10 +139,12 @@ def test_final_january_pickup_uses_february_precipitation(
         ["tpep_pickup_datetime"],
     )
 
+    # Act
     rows = TaxiWeatherJoiner().join(
         taxi_data=taxi_data, weather_data=weather_data
     ).collect()
 
+    # Assert
     assert len(rows) == 1
     assert rows[0].temperature_2m == 2.5
     assert rows[0].weather_code == 3

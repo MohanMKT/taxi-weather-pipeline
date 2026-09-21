@@ -14,7 +14,11 @@ def weather_calendar(spark: SparkSession) -> DataFrame:
 
 
 def test_complete_weather_calendar(weather_calendar: DataFrame) -> None:
-    WeatherDataCleaner().validate_calendar(weather_data=weather_calendar)
+    # Arrange
+    cleaner = WeatherDataCleaner()
+
+    # Act / Assert: complete coverage must not raise an exception.
+    cleaner.validate_calendar(weather_data=weather_calendar)
 
 
 @pytest.mark.parametrize(
@@ -31,11 +35,17 @@ def test_missing_required_hours_are_reported(
     missing_observations: list[str],
     missing_precipitation: list[str],
 ) -> None:
+    # Arrange
     incomplete = weather_calendar.filter(
         F.col("time") != F.lit(missing_time).cast("timestamp")
     )
+    cleaner = WeatherDataCleaner()
+
+    # Act / Assert
     with pytest.raises(ValueError, match="Missing weather coverage") as error:
-        WeatherDataCleaner().validate_calendar(weather_data=incomplete)
+        cleaner.validate_calendar(weather_data=incomplete)
+
+    # Assert
     assert str(error.value) == (
         "Missing weather coverage for January pickup hours: "
         f"instantaneous={missing_observations}; precipitation={missing_precipitation}"
@@ -43,5 +53,10 @@ def test_missing_required_hours_are_reported(
 
 
 def test_empty_weather_calendar_fails_clearly(weather_calendar: DataFrame) -> None:
+    # Arrange
+    empty_weather = weather_calendar.limit(0)
+    cleaner = WeatherDataCleaner()
+
+    # Act / Assert
     with pytest.raises(ValueError, match="Cleaned weather input is empty"):
-        WeatherDataCleaner().validate_calendar(weather_data=weather_calendar.limit(0))
+        cleaner.validate_calendar(weather_data=empty_weather)

@@ -25,6 +25,7 @@ def test_reader_and_cleaner_honor_source_offset(
     expected_local_time: str,
 ) -> None:
     """UTC-4 metadata determines the instant even when New York uses UTC-5."""
+    # Arrange
     path = tmp_path / "weather.csv"
     path.write_text(
         "latitude,longitude,elevation,utc_offset_seconds,timezone,timezone_abbreviation\n"
@@ -32,9 +33,11 @@ def test_reader_and_cleaner_honor_source_offset(
         "2024-01-01T00:00,1.9,3,0.5\n"
     )
     previous = spark.conf.get("spark.sql.session.timeZone")
+    # The shared session setting must be available for restoration in finally.
     assert previous is not None
     spark.conf.set("spark.sql.session.timeZone", session_timezone)
     try:
+        # Act
         data = WeatherReader(spark=spark).read(path=str(path))
         row = (
             WeatherDataCleaner()
@@ -50,6 +53,7 @@ def test_reader_and_cleaner_honor_source_offset(
             .first()
         )
 
+        # Assert
         assert row is not None
         assert row.utc_offset_seconds == -14400
         assert row.raw_time == "2024-01-01T00:00"
@@ -83,6 +87,7 @@ def test_reader_skips_metadata_and_preserves_bad_rows_for_quarantine(
 
     # Act
     data = WeatherReader(spark=spark).read(path=str(path))
+    raw_count = data.count()
     rows = WeatherDataCleaner().validate(weather_data=data).collect()
     invalid = {
         row.raw_weather_row: row.rejection_reasons
@@ -91,7 +96,7 @@ def test_reader_skips_metadata_and_preserves_bad_rows_for_quarantine(
     }
 
     # Assert: bad observations remain available with their raw CSV text and reasons.
-    assert data.count() == 5
+    assert raw_count == 5
     assert len([row for row in rows if not row.rejection_reasons]) == 2
     assert "invalid_weather_timestamp" in invalid["not-a-date,2.0,3,0.0"]
     assert "malformed_weather_row" in invalid["2024-01-01T12:00,broken,3,0.0"]
