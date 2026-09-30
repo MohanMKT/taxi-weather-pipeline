@@ -110,12 +110,15 @@ The pipeline prints its summaries, writes the chart, and persists rejected taxi 
 flowchart LR
     T[Taxi Parquet] --> TR[TaxiReader]
     TR --> TC[TaxiDataCleaner]
-    W[Weather CSV] --> WR[WeatherReader: validate header]
+    W[Weather CSV] --> WR["WeatherReader: validate header"]
     WR --> WC[WeatherDataCleaner]
-    TC -->|Accepted trips| J[Hourly left join]
-    WC -->|Accepted observations| J
-    TC -->|Rejected trips with reasons| QT[Taxi quarantine Parquet]
-    WC -->|Rejected observations with reasons| QW[Weather quarantine Parquet]
+
+    TC -->|"Accepted trips"| J["Hourly left join"]
+    WC -->|"Accepted observations"| J
+    
+    TC -->|"Rejected trips with reasons"| QT[Taxi quarantine Parquet]
+    WC -->|"Rejected observations with reasons"| QW[Weather quarantine Parquet]
+    
     J --> A[TaxiWeatherAnalyzer]
     A --> S[Summary tables]
     A --> V[Hourly demand chart]
@@ -320,19 +323,23 @@ flowchart LR
     A[Taxi fleet with local event buffer] --> B[Authenticated regional gateway]
     B --> C[Durable event log]
     C --> D[Stream validation and deduplication]
-    C --> F[Bronze: raw event archive]
-    F -. Replay and backfill .-> D
-    D --> G[Silver: validated and enriched trips]
+    C --> F["Bronze: raw event archive"]
+    
+    F -.-|"Replay and backfill"| D
+    
+    D --> G["Silver: validated and enriched trips"]
     W[Weather ingestion] --> G
-    G --> H[Gold: business metrics]
+    G --> H["Gold: business metrics"]
     H --> I[Analytics and management reporting]
-    D -->|Completed trips| J[Receipt service]
+    
+    D -->|"Completed trips"| J[Receipt service]
     J --> R[Receipt database and delivery outbox]
+    
     D --> E[Fraud detection and taxi positioning]
     E --> M[Vehicle command service]
-    M -->|Targeted commands| B
-    B -->|Vehicle-specific channel| A
-    B -->|Vehicle acknowledgements| M
+    M -->|"Targeted commands"| B
+    B -->|"Vehicle-specific channel"| A
+    B -->|"Vehicle acknowledgements"| M
 ```
 
 ### Architecture Rationale
