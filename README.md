@@ -324,17 +324,17 @@ flowchart LR
     B --> C[Durable event log]
     C --> D[Stream validation and deduplication]
     C --> F["Bronze: raw event archive"]
-    
-    F -.-|"Replay and backfill"| D
-    
+
+    F -. "Replay and backfill" .-> D
+
     D --> G["Silver: validated and enriched trips"]
     W[Weather ingestion] --> G
     G --> H["Gold: business metrics"]
     H --> I[Analytics and management reporting]
-    
+
     D -->|"Completed trips"| J[Receipt service]
     J --> R[Receipt database and delivery outbox]
-    
+
     D --> E[Fraud detection and taxi positioning]
     E --> M[Vehicle command service]
     M -->|"Targeted commands"| B
